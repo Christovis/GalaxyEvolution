@@ -23,7 +23,7 @@ def read_group_keys(fname, snapshot):
 
 
 class SubHalos:
-    def __init__(self, simulation, snapnum):
+    def __init__(self, simulation, snapnum, nepoch):
         """ 
         """
         self.simulation = simulation
@@ -99,7 +99,7 @@ class SubHalos:
 
             # Second Hand Data
             self.principal_axis(dfpart)
-            self.progenitors(snapnum-3, snapnum)
+            self.progenitors(snapnum-nepoch, snapnum)
 
 
     def match_halos(self, a, b):
@@ -120,8 +120,7 @@ class SubHalos:
             _coord = self.snapshot.data['Coordinates']['dm'][
                     dfpart['subhalo_offset'][i] : \
                             (dfpart['subhalo_offset'][i] + \
-                             dfpart['n_part'][i]),
-                            :]
+                             dfpart['n_part'][i]), :]
             _centre = [_coord[:, 0].min() + (_coord[:, 0].max() - _coord[:, 0].min())/2,
                        _coord[:, 1].min() + (_coord[:, 1].max() - _coord[:, 1].min())/2,
                        _coord[:, 2].min() + (_coord[:, 2].max() - _coord[:, 2].min())/2]
@@ -160,9 +159,18 @@ class SubHalos:
                 mtree, self.df['nodeIndex'].values, snapnum_pred, snapnum_obs)
         ## Filter
         _indx = self.match_halos(self.df['nodeIndex'].values, _nodeID)
-        print('test', len(_indx))
-        self.df = self.df.iloc[_indx]
+        
+        
+        print('test 1', len(_indx), len(np.unique(_indx)))
+        print('test 2', self.df['nodeIndex'].size,
+              np.max(_indx), self.df.index)
+        print(np.sort(_nodeID))
+        print(np.sort(self.df['nodeIndex'].values))
+        
+        self.df = self.df.iloc[np.unique(_indx)]
         self.df.index = range(len(self.df.index))
+        
+        print(np.sort(self.df['nodeIndex'].values))
 
         _indx = self.match_halos(_nodeID, self.df['nodeIndex'].values)
         _nodeID = _nodeID[_indx]

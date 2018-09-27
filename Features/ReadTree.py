@@ -322,12 +322,11 @@ class DHaloReader():
         print('_progcounts', _progcounts)
     
     
-    def find_progenitors_until_z(self, SH, mtree, z1, z2):
+    def find_progenitors_until_z(self, mtree, nodeID, z1, z2):
         """
         Number of progenitors att all redshift between z1 and z2.
 
         Input:
-            SH: re-ordered SubFind halo library with subhalos at chosen redshift
             mtree: DHalo merger-tree library
             z1: final redshift/end of tree
             z2: redshift of observed subhalo/-galaxy
@@ -336,17 +335,23 @@ class DHaloReader():
             progcounts: 2D list of progcounts per snapshot
         """
         snapcount = 0
+        print('from %d until %d' % (z2, z1))
         for ss in range(z2, z1, -1):
             if ss == z2:
-                _indx = np.where(mtree.data.snapshotNumber.values == ss)
-                nodeID = mtree.data.index.values[_indx]
+                df_target = pd.DataFrame({'nodeID':nodeID})
                 _indx = np.where(mtree.data.snapshotNumber.values == ss-1)
                 nodeID_prog = mtree.data.index.values[_indx]
                 nodeID_prog_desc = mtree.data.descendantIndex.values[_indx]
+                _indx = np.where((nodeID_prog_desc < 1e15) &
+                                 (nodeID_prog_desc > 1e11))
+                nodeID_prog = nodeID_prog[_indx]
+                nodeID_prog_desc = nodeID_prog_desc[_indx]
 
-                # Initiliaze Array
-                progcounts = np.zeros((len(nodeID), z2-z1))
-                nodeID_obs_ref = [None]*len(nodeID)
+                df_prog = pd.DataFrame({'nodeID' : nodeID_prog,
+                                        'nodeID_target' : nodeID_prog_desc})
+
+                # Initiliaze Output Array
+                progcounts = np.zeros((df_target['nodeID'].size, z2-z1))
 
                 # nodeID_prog_desc_unic is sorted
                 nodeID_prog_desc_unic, count = np.unique(nodeID_prog_desc,
@@ -355,22 +360,22 @@ class DHaloReader():
                 nodeID_prog_desc_unic=nodeID_prog_desc_unic[1:]; count=count[1:]
 
                 # Nr. of progenitors for sub-&halos at snapshot z2
-                _indx_now = np.arange(nodeID.shape[0])[np.in1d(
-                    nodeID, nodeID_prog_desc_unic,
-                    assume_unique=True)]
-                now_sort_indx = np.argsort(nodeID[_indx_now])
+                s = pd.Index(df_target['nodeID'].tolist())
+                _indx_now = s.get_indexer(list(nodeID_prog_desc_unic))
+                now_sort_indx = np.argsort(df_target['nodeID'].values[_indx_now])
                 pro_sort_indx = np.argsort(nodeID_prog_desc_unic)
                 progcounts[_indx_now[now_sort_indx], snapcount] = count[pro_sort_indx]
                     
-                # sort nodeID_prog to nodeID
-                df_prog = pd.DataFrame({'nodeID' : nodeID_prog,
-                                        'nodeID_target' : nodeID_prog_desc})
-                df_target = pd.DataFrame({'nodeID':nodeID})
             else:
                 df_now = df_prog
                 _indx = np.where(mtree.data.snapshotNumber.values == ss-1)
-                df_prog = pd.DataFrame({'nodeID' : mtree.data.index.values[_indx]})
+                nodeID_prog = mtree.data.index.values[_indx]
                 nodeID_prog_desc = mtree.data.descendantIndex.values[_indx]
+                #_indx = np.where((nodeID_prog_desc < 1e15) &
+                #                 (nodeID_prog_desc > 1e10))
+                #nodeID_prog = nodeID_prog[_indx]
+                #nodeID_prog_desc = nodeID_prog_desc[_indx]
+                df_prog = pd.DataFrame({'nodeID' : nodeID_prog})
          
                 progcounts_local = np.zeros(df_now['nodeID'].size)
                 nodeID_prog_desc_unic, count = np.unique(nodeID_prog_desc,
@@ -378,6 +383,7 @@ class DHaloReader():
                 # remove -1's
                 nodeID_prog_desc_unic=nodeID_prog_desc_unic[1:]; count=count[1:]
                 
+                # progenitors for snapshot ss
                 s = pd.Index(df_now['nodeID'].tolist())
                 _indx_now = s.get_indexer(list(nodeID_prog_desc_unic))
                 now_sort_indx = np.argsort(df_now['nodeID'].values[_indx_now])
@@ -390,7 +396,8 @@ class DHaloReader():
                 df_inter = df_now.groupby(['nodeID_target'],
                                           as_index=False)['progcount'].sum()
                 # only real progeniteurs
-                df_inter = df_inter[df_inter['nodeID_target'] >= 1e11]
+                df_inter = df_inter[(df_inter['nodeID_target'] > 1e10) & 
+                                    (df_inter['nodeID_target'] < 1e15)]
                 df_inter = df_inter.drop_duplicates(subset=['nodeID_target'],
                                                     keep='first')
                 
@@ -404,21 +411,21 @@ class DHaloReader():
                 #s = pd.Index(df_now['nodeID'].tolist())
                 #_indx_now = s.get_indexer(list(nodeID_prog_desc_unic))
                 #df_now['nodeID_target'].values[_indx_now]
-               
-                if ss != z1-1:
-                    obs_ref_local = np.zeros(df_prog['nodeID'].size)
-                    for ii in range(len(nodeID_prog_desc_unic)):
-                        tarID = df_now.loc[
-                                df_now['nodeID'] == nodeID_prog_desc_unic[ii],
-                                'nodeID_target']
+                
+                obs_ref_local = np.zeros(df_prog['nodeID'].size)
+                for ii in range(len(nodeID_prog_desc_unic)):
+                    tarID = df_now.loc[
+                            df_now['nodeID'] == nodeID_prog_desc_unic[ii],
+                            'nodeID_target'].values.astype(int)
+                    if tarID:
                         _indx = np.where(
                                 nodeID_prog_desc == nodeID_prog_desc_unic[ii])
-                        obs_ref_local[_indx] = int(tarID)
-                    df_prog['nodeID_target'] = pd.Series(obs_ref_local,
-                                                         index=df_prog.index)
+                        obs_ref_local[_indx] = tarID
+                df_prog['nodeID_target'] = pd.Series(obs_ref_local,
+                                                     index=df_prog.index)
 
             snapcount += 1
-        del nodeID_prog, nodeID_prog_desc
+        del nodeID_prog_desc
         del df_now, df_inter, df_prog
         return np.asarray(df_target['nodeID'].tolist()), progcounts
 
