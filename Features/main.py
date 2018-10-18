@@ -1,19 +1,19 @@
 from __future__ import division
 import numpy as np
 import h5py
-from ReadTree import DHaloReader as DHalo
-from ReadTree import read_tree_keys
+#from ReadTree import DHaloReader as DHalo
+#from ReadTree import read_tree_keys
 from SubHalos import SubHalos as SHfuncs
-from SubHalos import read_subhalo_keys
-from SubHalos import read_group_keys
+#from SubHalos import read_subhalo_keys
+#from SubHalos import read_group_keys
 
 #******************** Load Data ***********************
 # snapnum:redshift -> 71:0.131 -> 64:0.393
 
 ## SubFind
 
-SH = SHfuncs('christian_dm', 71, 3)
-SH.df.to_hdf('SubhaloData_contin.h5', key='Halos', mode='w')
+SH = SHfuncs('EAGLE', 28, 3)
+SH.df.to_hdf('EAGLE_contin.h5', key='Halos', mode='w')
 
 ## Merger Tree
 #print('prognum', SH.prognum[:10, :])

@@ -2,9 +2,11 @@ import sys
 import h5py
 import numpy as np
 import pandas as pd
-from ReadTree import DHaloReader as DHalo
+#from ReadTree import DHaloReader as DHalo
+import ReadTree
 sys.path.insert(0,'../../lib/')
 import read_hdf5
+import read_hdf5_eagle
 
 
 def read_subhalo_keys(fname, snapshot):
@@ -28,30 +30,47 @@ class SubHalos:
         """
         self.simulation = simulation
 
-        if (self.simulation == 'christian_dm'):
-            self.sh_orig_file = '/cosma5/data/dp004/dc-oles1/dhalo/data/GR/'
-            self.sh_reor_file = '/cosma5/data/dp004/dc-beck3/Galaxy_Evolution/SubFind/dm_only/L62_N512_GR/subfind.0.hdf5'
-            self.mt_file = '/cosma5/data/dp004/dc-oles1/dhalo/out/trees/GR/treedir_075/tree_075.0.hdf5'
+        if (self.simulation == "christian_dm"):
+            self.sh_orig_file = "/cosma5/data/dp004/dc-oles1/dhalo/data/GR/"
+            self.sh_reor_file = "/cosma5/data/dp004/dc-beck3/Galaxy_Evolution/" \
+                                "SubFind/dm_only/L62_N512_GR/subfind.0.hdf5"
+            self.mt_file = "/cosma5/data/dp004/dc-oles1/dhalo/out/trees/GR/" \
+                           "treedir_075/tree_075.0.hdf5"
             self.snapshot = read_hdf5.snapshot(snapnum, self.sh_orig_file)
             print('Loading snapshot at z=%f' % self.snapshot.header.redshift)
         elif (self.simulation == 'christian_fp'):
             print('Not Ready !!!')
-            #self.sh_orig_file = '/cosma6/data/dp004/dc-arno1/SZ_project/full_physics/L62_N512_GR_kpc/'
-            #self.sh_orig_file = '' #not available yet
-            #self.snapshot = read_hdf5.snapshot(snapnum, h5_dir, snapbases = ['/gadget-groupordered_'])
-        elif (self.simulation == 'EAGLE'):
-            h5_dir = '/cosma5/data/Eagle/ScienceRuns/Planck1/L0100N1504/PE/REFERENCE/data/'
+        elif (self.simulation == "EAGLE"):
+            self.sh_orig_file = "/cosma5/data/Eagle/ScienceRuns/Planck1/" \
+                                "L0100N1504/PE/REFERENCE/data/"
+            self.sh_reor_file = "."
+            self.mt_file = "/gpfs/data/Eagle/yanTestRuns/MergerTree/Dec14/" \
+                           "L0100N1504/EAGLE_L0100N1504_db.hdf5"
+            ReadTree.read_tree_keys(self.mt_file)
             snapbases = '/eagle_subfind_particles_0%s_z000p000'%str(snapnum)
             dirbases = 'particledata_0%s_z000p000'%str(snapnum)
-            self.snapshot = read_hdf5_eagle.snapshot(snapnum, h5_dir,
+            self.snapshot = read_hdf5_eagle.snapshot(snapnum, self.sh_orig_file,
                                                      snapbases=[snapbases],
                                                      dirbases=[dirbases])
+        
         # Load the useful fields
         if (self.simulation == 'EAGLE'):
+            print('self.snapshot', self.snapshot)
             self.snapshot.group_catalog(['GroupMass', 'Group_M_Crit200',
                                          'Group_R_Crit200', 'NumOfSubhalos',
                                          'GroupLength', 'GroupCentreOfPotential',
                                          'MassType'])
+            ## Read with respect to the merger-tree re-ordered SubFind file
+            hdf = h5py.File(self.sh_reor_file, 'r')
+            self.df = pd.DataFrame({'snapnum' : hdf['Subhalo']['SnapNum'][:],
+                                    'mass_total' : hdf['Subhalo']['SubhaloMass'][:],
+                                    'halfmassrad' : hdf['Subhalo']['SubhaloHalfmassRad'][:],
+                                    'sigma' : hdf['Subhalo']['SubhaloVelDisp'][:],
+                                    'nodeIndex' : hdf['Subhalo']['nodeIndex'][:],
+                                    'id_mostbound' : hdf['Subhalo']['SubhaloIDMostbound'][:]})
+            _indx = self.df[self.df['snapnum'] == snapnum].index
+            self.df = self.df[self.df['snapnum'] == snapnum]
+            self.df.index = range(len(self.df.index))
         else:
             # First Hand Data
             ## Snapshot particle related data
@@ -154,6 +173,7 @@ class SubHalos:
     def progenitors(self, snapnum_pred, snapnum_obs):
         """
         """
+        #if self.simulation == "christian_dm":
         mtree = DHalo(self.mt_file)
         _nodeID, _prognum = mtree.find_progenitors_until_z(
                 mtree, self.df['nodeIndex'].values, snapnum_pred, snapnum_obs)
@@ -184,6 +204,7 @@ class SubHalos:
             _prognum_dict[('progenitors', str(ii))] = _prognum[_indx, ii]
         dfp = pd.DataFrame.from_dict(_prognum_dict)
         self.df = pd.concat([self.df, dfp], axis=1)               
+        #if self.simulation == "EAGLE":
 
 
     def concentration(self):
