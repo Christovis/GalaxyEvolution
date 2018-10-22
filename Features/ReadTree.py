@@ -23,21 +23,34 @@ def read_tree_keys(fname):
 class DHaloReader():
     """DHalo Reader class.
     """
-    def __init__(self, fname):
-        self.filename = fname
-        self.columns = [
-            "nodeIndex",
-            "snapshotNumber",
-            "hostIndex",
-            "descendantHost",
-            "descendantIndex",
-            "isMainProgenitor",
-            "mainProgenitorIndex",
-            "isInterpolated"
-        ]
-        self.data = self.read()
+    def __init__(self, fname, simtype):
+        if simtype == 'original':
+            self.filename = fname
+            self.columns = [
+                "nodeIndex",
+                "snapshotNumber",
+                "hostIndex",
+                "descendantHost",
+                "descendantIndex",
+                "isMainProgenitor",
+                "mainProgenitorIndex",
+                "isInterpolated"
+            ]
+            self.data = self.read(simtype)
+        elif simtype == 'EAGLE':
+            self.filename = fname
+            self.columns = [
+                "DhaloIndex",
+                "GroupIndex",
+                "SnapNum",
+                "DescendantID",
+                "HaloID",
+                "LastProgID",
+                "TopLeafID"
+            ]
+            self.data = self.read(simtype)
 
-    def read(self):
+    def read(self, simtype):
         """Reads DHalo data into memory
 
         Output data format:
@@ -75,49 +88,88 @@ class DHaloReader():
             1 if it is
         """
 
-        if self.filename.endswith(".pkl"):
-            logging.debug("Loading pickle file %s", self.filename)
-            data = pd.read_pickle(self.filename)
+        if simtype == 'original':
+            if self.filename.endswith(".pkl"):
+                logging.debug("Loading pickle file %s", self.filename)
+                data = pd.read_pickle(self.filename)
 
-        elif self.filename.endswith(".hdf5"):
-            logging.debug("Loading HDF5 file %s", self.filename)
-            with h5py.File(self.filename, "r") as data_file:
-                #print('treeIndex', data_file["treeIndex"].keys())
-                #print('haloTrees', data_file["haloTrees"].keys())
-                
-                # Find dimensionality of keys
-                columns_1dim = [] 
-                columns_2dim = [] 
+            elif self.filename.endswith(".hdf5"):
+                logging.debug("Loading HDF5 file %s", self.filename)
+                with h5py.File(self.filename, "r") as data_file:
+                    #print('treeIndex', data_file["treeIndex"].keys())
+                    #print('haloTrees', data_file["haloTrees"].keys())
+                    
+                    # Find dimensionality of keys
+                    columns_1dim = [] 
+                    columns_2dim = [] 
+                    for column in self.columns:
+                        if len(data_file["/haloTrees/%s" % column].shape) == 1:
+                            columns_1dim.append(column)
+                        else:
+                            columns_2dim.append(column)
+                    
+                    # 1D keys
+                    data = pd.DataFrame(
+                        {
+                            column: data_file["/haloTrees/%s" % column].value
+                            for column in columns_1dim
+                        },
+                        columns=columns_1dim
+                    ).set_index("nodeIndex")
+                    del columns_1dim
+
+                    # 2D keys
+                    for column in columns_2dim:
+                        if column == 'position':
+                            pos = data_file["/haloTrees/%s" % column].value
+                            data['X'] = pd.Series(pos[:, 0], index=data.index)
+                            data['Y'] = pd.Series(pos[:, 1], index=data.index)
+                            data['Z'] = pd.Series(pos[:, 2], index=data.index)
+                    del columns_2dim
+
+                    ## eliminate fake elements with isIntegrated=1
+                    #data = data[data.isInterpolated != 1]
+
+            else:
+                raise TypeError("Unknown filetype %s" % self.filename)
+        if simtype == 'EAGLE':
+            if self.filename.endswith(".pkl"):
+                logging.debug("Loading pickle file %s", self.filename)
+                data = pd.read_pickle(self.filename)
+
+            elif self.filename.endswith(".hdf5"):
+                logging.debug("Loading HDF5 file %s", self.filename)
+                data_file = h5py.File(self.filename, 'r')
+                column_mt = []
+                column_sh = []
                 for column in self.columns:
-                    if len(data_file["/haloTrees/%s" % column].shape) == 1:
-                        columns_1dim.append(column)
+                    if column in data_file['MergerTree']:
+                        column_mt.append(column)
                     else:
-                        columns_2dim.append(column)
-                
-                # 1D keys
+                        column_sh.append(column)
+
                 data = pd.DataFrame(
                     {
-                        column: data_file["/haloTrees/%s" % column].value
-                        for column in columns_1dim
+                        column: data_file["/MergerTree/%s" % column].value
+                        for column in column_mt
                     },
-                    columns=columns_1dim
-                ).set_index("nodeIndex")
-                del columns_1dim
+                    columns=column_mt
+                ).set_index(data_file["/Subhalo/DhaloIndex"].value)
 
-                # 2D keys
-                for column in columns_2dim:
-                    if column == 'position':
-                        pos = data_file["/haloTrees/%s" % column].value
-                        data['X'] = pd.Series(pos[:, 0], index=data.index)
-                        data['Y'] = pd.Series(pos[:, 1], index=data.index)
-                        data['Z'] = pd.Series(pos[:, 2], index=data.index)
-                del columns_2dim
+                #data = pd.DataFrame(
+                #    {
+                #        column: data_file["/Subhalo/%s" % column].value
+                #        for column in column_sh
+                #    },
+                #    columns=column_sh
+                #).set_index("DhaloIndex")
+                    
+                for column in column_sh:
+                    data[column] = pd.Series(data_file["/Subhalo/%s" % column].value,
+                                             index=data.index)
 
-                ## eliminate fake elements with isIntegrated=1
-                #data = data[data.isInterpolated != 1]
-
-        else:
-            raise TypeError("Unknown filetype %s" % self.filename)
+            else:
+                raise TypeError("Unknown filetype %s" % self.filename)
 
         return data
 
@@ -336,6 +388,114 @@ class DHaloReader():
         """
         snapcount = 0
         print('from %d until %d' % (z2, z1))
+        for ss in range(z2, z1, -1):
+            if ss == z2:
+                df_target = pd.DataFrame({'nodeID':nodeID})
+                _indx = np.where(mtree.data.snapshotNumber.values == ss-1)
+                nodeID_prog = mtree.data.index.values[_indx]
+                nodeID_prog_desc = mtree.data.descendantIndex.values[_indx]
+                _indx = np.where((nodeID_prog_desc < 1e15) &
+                                 (nodeID_prog_desc > 1e11))
+                nodeID_prog = nodeID_prog[_indx]
+                nodeID_prog_desc = nodeID_prog_desc[_indx]
+
+                df_prog = pd.DataFrame({'nodeID' : nodeID_prog,
+                                        'nodeID_target' : nodeID_prog_desc})
+
+                # Initiliaze Output Array
+                progcounts = np.zeros((df_target['nodeID'].size, z2-z1))
+
+                # nodeID_prog_desc_unic is sorted
+                nodeID_prog_desc_unic, count = np.unique(nodeID_prog_desc,
+                                                         return_counts=True)
+                # remove -1's
+                nodeID_prog_desc_unic=nodeID_prog_desc_unic[1:]; count=count[1:]
+
+                # Nr. of progenitors for sub-&halos at snapshot z2
+                s = pd.Index(df_target['nodeID'].tolist())
+                _indx_now = s.get_indexer(list(nodeID_prog_desc_unic))
+                now_sort_indx = np.argsort(df_target['nodeID'].values[_indx_now])
+                pro_sort_indx = np.argsort(nodeID_prog_desc_unic)
+                progcounts[_indx_now[now_sort_indx], snapcount] = count[pro_sort_indx]
+                    
+            else:
+                df_now = df_prog
+                _indx = np.where(mtree.data.snapshotNumber.values == ss-1)
+                nodeID_prog = mtree.data.index.values[_indx]
+                nodeID_prog_desc = mtree.data.descendantIndex.values[_indx]
+                #_indx = np.where((nodeID_prog_desc < 1e15) &
+                #                 (nodeID_prog_desc > 1e10))
+                #nodeID_prog = nodeID_prog[_indx]
+                #nodeID_prog_desc = nodeID_prog_desc[_indx]
+                df_prog = pd.DataFrame({'nodeID' : nodeID_prog})
+         
+                progcounts_local = np.zeros(df_now['nodeID'].size)
+                nodeID_prog_desc_unic, count = np.unique(nodeID_prog_desc,
+                                                         return_counts=True)
+                # remove -1's
+                nodeID_prog_desc_unic=nodeID_prog_desc_unic[1:]; count=count[1:]
+                
+                # progenitors for snapshot ss
+                s = pd.Index(df_now['nodeID'].tolist())
+                _indx_now = s.get_indexer(list(nodeID_prog_desc_unic))
+                now_sort_indx = np.argsort(df_now['nodeID'].values[_indx_now])
+                pro_sort_indx = np.argsort(nodeID_prog_desc_unic)
+                progcounts_local[_indx_now[now_sort_indx]] = count[pro_sort_indx]
+                df_now['progcount'] = pd.Series(progcounts_local,
+                                                index=df_now.index, dtype=int)
+
+                # Nr. of progenitors for sub-&halos at snapshot z2
+                df_inter = df_now.groupby(['nodeID_target'],
+                                          as_index=False)['progcount'].sum()
+                # only real progeniteurs
+                df_inter = df_inter[(df_inter['nodeID_target'] > 1e10) & 
+                                    (df_inter['nodeID_target'] < 1e15)]
+                df_inter = df_inter.drop_duplicates(subset=['nodeID_target'],
+                                                    keep='first')
+                
+                s = pd.Index(df_target['nodeID'].tolist())
+                _indx_now = s.get_indexer(df_inter['nodeID_target'].tolist())
+                now_sort_indx = np.argsort(df_target['nodeID'].values[_indx_now])
+                pro_sort_indx = np.argsort(df_inter['nodeID_target'].values)
+                progcounts[_indx_now[now_sort_indx], snapcount] = df_inter['progcount'].values[pro_sort_indx]
+
+                # sort nodeID_prog to nodeID
+                #s = pd.Index(df_now['nodeID'].tolist())
+                #_indx_now = s.get_indexer(list(nodeID_prog_desc_unic))
+                #df_now['nodeID_target'].values[_indx_now]
+                
+                obs_ref_local = np.zeros(df_prog['nodeID'].size)
+                for ii in range(len(nodeID_prog_desc_unic)):
+                    tarID = df_now.loc[
+                            df_now['nodeID'] == nodeID_prog_desc_unic[ii],
+                            'nodeID_target'].values.astype(int)
+                    if tarID:
+                        _indx = np.where(
+                                nodeID_prog_desc == nodeID_prog_desc_unic[ii])
+                        obs_ref_local[_indx] = tarID
+                df_prog['nodeID_target'] = pd.Series(obs_ref_local,
+                                                     index=df_prog.index)
+
+            snapcount += 1
+        del nodeID_prog_desc
+        del df_now, df_inter, df_prog
+        return np.asarray(df_target['nodeID'].tolist()), progcounts
+
+
+    def find_progenitors_until_z_EAGLE(self, mtree, nodeID, z1, z2):
+        """
+        Number of progenitors att all redshift between z1 and z2.
+
+        Input:
+            mtree: DHalo merger-tree library
+            z1: final redshift/end of tree
+            z2: redshift of observed subhalo/-galaxy
+        Output:
+            nodeID: nodeID's of structure at z2
+            progcounts: 2D list of progcounts per snapshot
+        """
+        snapcount = 0
+        print(':Read MergerTree from %d until %d' % (z2, z1))
         for ss in range(z2, z1, -1):
             if ss == z2:
                 df_target = pd.DataFrame({'nodeID':nodeID})

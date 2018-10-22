@@ -2,14 +2,14 @@ import sys
 import h5py
 import numpy as np
 import pandas as pd
-#from ReadTree import DHaloReader as DHalo
+from ReadTree import DHaloReader as DHalo
 import ReadTree
 sys.path.insert(0,'../../lib/')
 import read_hdf5
 import read_hdf5_eagle
 
 
-def read_subhalo_keys(fname, snapshot):
+def read_subhalo_keys(fname):
     """ Print keys of re-ordered SubFind subhalos output """
     df = h5py.File(fname, 'r')
     print('The following Subhalo properties are available:')
@@ -17,7 +17,7 @@ def read_subhalo_keys(fname, snapshot):
     print('\n')
 
 
-def read_group_keys(fname, snapshot):
+def read_group_keys(fname):
     df = h5py.File(fname, 'r')
     print('The following Group properties are available:')
     print('\n'.join(list(df.keys())))
@@ -37,41 +37,28 @@ class SubHalos:
             self.mt_file = "/cosma5/data/dp004/dc-oles1/dhalo/out/trees/GR/" \
                            "treedir_075/tree_075.0.hdf5"
             self.snapshot = read_hdf5.snapshot(snapnum, self.sh_orig_file)
-            print('Loading snapshot at z=%f' % self.snapshot.header.redshift)
+            print(':Loading snapshot at z=%f' % self.snapshot.header.redshift)
         elif (self.simulation == 'christian_fp'):
-            print('Not Ready !!!')
+            self.sh_orig_file = "/cosma6/data/dp004/dc-arno1/SZ_project/" \
+                                "full_physics/L62_N512_GR_kpc/"
+            self.sh_reor_file = "/cosma5/data/dp004/dc-beck3/Galaxy_Evolution/" \
+                                "SubFind/fp/L62_N512_GR/subfind.0.hdf5"
+            self.mt_file = "/cosma/home/dp004/dc-oles1/var/data/dhalo/out/" \
+                           "trees/full_physics_GR/treedir_045/tree_045.0.hdf5"
+            self.snapshot = read_hdf5.snapshot(snapnum, self.sh_orig_file)
+            print(':Loading snapshot at z=%f' % self.snapshot.header.redshift)
         elif (self.simulation == "EAGLE"):
-            self.sh_orig_file = "/cosma5/data/Eagle/ScienceRuns/Planck1/" \
-                                "L0100N1504/PE/REFERENCE/data/"
-            self.sh_reor_file = "."
-            self.mt_file = "/gpfs/data/Eagle/yanTestRuns/MergerTree/Dec14/" \
-                           "L0100N1504/EAGLE_L0100N1504_db.hdf5"
-            ReadTree.read_tree_keys(self.mt_file)
-            snapbases = '/eagle_subfind_particles_0%s_z000p000'%str(snapnum)
-            dirbases = 'particledata_0%s_z000p000'%str(snapnum)
-            self.snapshot = read_hdf5_eagle.snapshot(snapnum, self.sh_orig_file,
-                                                     snapbases=[snapbases],
-                                                     dirbases=[dirbases])
-        
+            self.sh_file = "/gpfs/data/Eagle/yanTestRuns/MergerTree/" \
+                           "Dec14/L0100N1504/EAGLE_L0100N1504_db.hdf5"
+            self.part_file = "/cosma5/data/Eagle/ScienceRuns/Planck1/" \
+                             "L0100N1504/PE/REFERENCE/data/"
+            self.mt_file = "/gpfs/data/Eagle/yanTestRuns/MergerTree/" \
+                           "Dec14/L0100N1504/EAGLE_L0100N1504_db.hdf5"
+            self.snapshot = read_hdf5_eagle.snapshot(snapnum, self.part_file)
+            print(':Loading snapshot at z=%f' % self.snapshot.header.redshift)
+
         # Load the useful fields
-        if (self.simulation == 'EAGLE'):
-            print('self.snapshot', self.snapshot)
-            self.snapshot.group_catalog(['GroupMass', 'Group_M_Crit200',
-                                         'Group_R_Crit200', 'NumOfSubhalos',
-                                         'GroupLength', 'GroupCentreOfPotential',
-                                         'MassType'])
-            ## Read with respect to the merger-tree re-ordered SubFind file
-            hdf = h5py.File(self.sh_reor_file, 'r')
-            self.df = pd.DataFrame({'snapnum' : hdf['Subhalo']['SnapNum'][:],
-                                    'mass_total' : hdf['Subhalo']['SubhaloMass'][:],
-                                    'halfmassrad' : hdf['Subhalo']['SubhaloHalfmassRad'][:],
-                                    'sigma' : hdf['Subhalo']['SubhaloVelDisp'][:],
-                                    'nodeIndex' : hdf['Subhalo']['nodeIndex'][:],
-                                    'id_mostbound' : hdf['Subhalo']['SubhaloIDMostbound'][:]})
-            _indx = self.df[self.df['snapnum'] == snapnum].index
-            self.df = self.df[self.df['snapnum'] == snapnum]
-            self.df.index = range(len(self.df.index))
-        else:
+        if (self.simulation == 'christian_dm'):
             # First Hand Data
             ## Snapshot particle related data
             self.snapshot.group_catalog(["SubhaloLenType",
@@ -84,9 +71,10 @@ class SubHalos:
                      'Z' : (self.snapshot.cat['SubhaloPos'][:, 2]).astype(np.float64),
                      'n_part' : (self.snapshot.cat["SubhaloLenType"][:, 1]).astype(np.int64)}
                     )
+            print(':Original data-set contains %d subhalos' % (dfpart.shape[0]))
             subhalo_offset = (np.cumsum(dfpart['n_part'].values) - \
                               dfpart['n_part'].values).astype(int)
-            dfpart['subhalo_offset'] = pd.Series(subhalo_offset, index=dfpart.index, dtype=int)
+            dfpart['offset'] = pd.Series(subhalo_offset, index=dfpart.index, dtype=int)
             self.snapshot.read(["Coordinates"], parttype=[1])
             del subhalo_offset, self.snapshot.cat
 
@@ -119,7 +107,119 @@ class SubHalos:
             # Second Hand Data
             self.principal_axis(dfpart)
             self.progenitors(snapnum-nepoch, snapnum)
+            print(':Final data-set contains %d subhalos' % (self.df.shape[0]))
 
+        elif (self.simulation == 'christian_fp'):
+            # First Hand Data
+            ## Snapshot particle related data
+            self.snapshot.group_catalog(["SubhaloLenType",
+                                         "SubhaloPos",
+                                         "SubhaloIDMostbound"])
+            dfpart = pd.DataFrame(
+                    {'id_mostbound' : (self.snapshot.cat['SubhaloIDMostbound']).astype(np.int64),
+                     'X' : (self.snapshot.cat['SubhaloPos'][:, 0]).astype(np.float64),
+                     'Y' : (self.snapshot.cat['SubhaloPos'][:, 1]).astype(np.float64),
+                     'Z' : (self.snapshot.cat['SubhaloPos'][:, 2]).astype(np.float64),
+                     'n_part' : (self.snapshot.cat["SubhaloLenType"][:, 1]).astype(np.int64)}
+                    )
+            print(':Original data-set contains %d subhalos' % (dfpart.shape[0]))
+            subhalo_offset = (np.cumsum(dfpart['n_part'].values) - \
+                              dfpart['n_part'].values).astype(int)
+            dfpart['offset'] = pd.Series(subhalo_offset, index=dfpart.index, dtype=int)
+            self.snapshot.read(["Coordinates"], parttype=[1])
+            del subhalo_offset, self.snapshot.cat
+
+            ## Read with respect to the merger-tree re-ordered SubFind file
+            hdf = h5py.File(self.sh_reor_file, 'r')
+            self.df = pd.DataFrame({'snapnum' : hdf['Subhalo']['SnapNum'][:],
+                                    'mass_total' : hdf['Subhalo']['SubhaloMass'][:],
+                                    'sfr' : hdf['Subhalo']['SubhaloSFR'][:],
+                                    'halfmassrad' : hdf['Subhalo']['SubhaloHalfmassRadType'][:, 4],
+                                    'sigma' : hdf['Subhalo']['SubhaloVelDisp'][:],
+                                    'nodeIndex' : hdf['Subhalo']['nodeIndex'][:],
+                                    'id_mostbound' : hdf['Subhalo']['SubhaloIDMostbound'][:]})
+            _indx = self.df[self.df['snapnum'] == snapnum].index
+            self.df = self.df[self.df['snapnum'] == snapnum]
+            self.df.index = range(len(self.df.index))
+
+            print('::::: SFR:', self.df['sfr'])
+
+            spin = hdf['Subhalo']['SubhaloSpin'][:]
+            spin = spin[_indx, :]
+            spin = [np.sqrt((spin[ii, 0]**2 + spin[ii, 1]**2 + spin[ii, 2]**2)/3) for ii in range(len(spin))]
+            self.df['spin'] = pd.Series(spin, index=self.df.index, dtype=float)
+            
+            ## Filter
+            _indx = self.match_halos(self.df['id_mostbound'].values, dfpart['id_mostbound'].values)
+            self.df = self.df.iloc[_indx]
+            self.df.index = range(len(self.df.index))
+
+            _indx = self.match_halos(dfpart['id_mostbound'].values, self.df['id_mostbound'].values)
+            dfpart = dfpart.iloc[_indx]
+            dfpart.index = range(len(dfpart.index))
+
+            # Second Hand Data
+            self.principal_axis(dfpart)
+            self.progenitors(snapnum-nepoch, snapnum)
+            print(':Final data-set contains %d subhalos' % (self.df.shape[0]))
+        
+        elif (self.simulation == 'EAGLE'):
+            # First Hand Data
+            ## Snapshot particle related data
+            #self.snapshot.group_catalog(["SubLengthType",
+            #                             "CentreOfMass",
+            #                             "IDMostBound"])
+            #dfpart = pd.DataFrame(
+            #        {'id_mostbound' : (self.snapshot.cat['IDMostBound']).astype(np.int64),
+            #         'X' : (self.snapshot.cat['CentreOfMass'][:, 0]).astype(np.float64),
+            #         'Y' : (self.snapshot.cat['CentreOfMass'][:, 1]).astype(np.float64),
+            #         'Z' : (self.snapshot.cat['CentreOfMass'][:, 2]).astype(np.float64),
+            #         'n_part' : (self.snapshot.cat["SubLengthType"][:, 1]).astype(np.int64)}
+            #        )
+            #print(':Original data-set contains %d subhalos' % (dfpart.shape[0]))
+            #subhalo_offset = (np.cumsum(dfpart['n_part'].values) - \
+            #                  dfpart['n_part'].values).astype(int)
+            #dfpart['offset'] = pd.Series(subhalo_offset, index=dfpart.index, dtype=int)
+            #self.snapshot.read(["Coordinates"], parttype=[1])
+            #del subhalo_offset
+            
+            ## Read with respect to the merger-tree re-ordered SubFind file
+            hdf = h5py.File(self.sh_file, 'r')
+            self.df = pd.DataFrame(
+                    {'snapnum' : hdf['Subhalo']['SnapNum'][:],
+                     'mass_total' : hdf['Subhalo']['Mass'][:],
+                     'halfmassrad' : hdf['Subhalo']['HalfMassRad_Star'][:],
+                     'sigma' : hdf['Subhalo']['StellarVelDisp'][:],
+                     'DhaloIndex' : hdf['Subhalo']['DhaloIndex'][:],
+                     'DescendantID' : hdf['MergerTree']['DescendantID'][:],
+                     'HaloID' : hdf['MergerTree']['HaloID'][:],
+                     'LastProgID' : hdf['MergerTree']['LastProgID'][:],
+                     'TopLeafID' : hdf['MergerTree']['TopLeafID'][:]}
+                    )
+           
+
+            self.df = self.df[self.df['snapnum'] == snapnum]
+            self.df.index = range(len(self.df.index))
+            print(':Original data-set contains %d subhalos' % (self.df.shape[0]))
+            
+            self.dfmt = pd.DataFrame(
+                    {'snapnum' : hdf['MergerTree']['DescendantID'][:],
+                     'DescendantID' : hdf['MergerTree']['DescendantID'][:],
+                     'HaloID' : hdf['MergerTree']['HaloID'][:],
+                     'LastProgID' : hdf['MergerTree']['LastProgID'][:]}
+                    )
+
+
+            #_indx = self.df[(self.df['snapnum'] >= snapnum-nepoch) & \
+            #                (self.df['snapnum'] <= snapnum)].index
+            self.df = self.df[(self.df['snapnum'] >= snapnum-nepoch) & \
+                             (self.df['snapnum'] <= snapnum)]
+            self.df.index = range(len(self.df.index))
+            
+            self.progenitors(snapnum-nepoch, snapnum, self.simulation)
+        
+            print(':Final data-set contains %d subhalos' % (self.df.shape[0]))
+            
 
     def match_halos(self, a, b):
         idxa = np.argsort(a)
@@ -137,8 +237,8 @@ class SubHalos:
             if dfpart['n_part'][i] < 100:
                 continue
             _coord = self.snapshot.data['Coordinates']['dm'][
-                    dfpart['subhalo_offset'][i] : \
-                            (dfpart['subhalo_offset'][i] + \
+                    dfpart['offset'][i] : \
+                            (dfpart['offset'][i] + \
                              dfpart['n_part'][i]), :]
             _centre = [_coord[:, 0].min() + (_coord[:, 0].max() - _coord[:, 0].min())/2,
                        _coord[:, 1].min() + (_coord[:, 1].max() - _coord[:, 1].min())/2,
@@ -150,7 +250,7 @@ class SubHalos:
             # Distance weighted Intertia Tensor / Reduced Inertia Tensor
             _I = np.dot(_distance.transpose(), _distance)
             _I /= np.sum(_distance**2)
-            _I[~(np.eye(3) == 1)] *= -1
+            #_I[~(np.eye(3) == 1)] *= -1
     
             _eigenvalues, _eigenvectors = np.linalg.eig(_I)
             if ((_eigenvalues < 0).sum() > 0) or (np.sum(_eigenvalues) == 0):
@@ -170,41 +270,55 @@ class SubHalos:
         del dfpart
     
     
-    def progenitors(self, snapnum_pred, snapnum_obs):
+    def progenitors(self, snapnum_pred, snapnum_obs, simulation):
         """
         """
-        #if self.simulation == "christian_dm":
-        mtree = DHalo(self.mt_file)
-        _nodeID, _prognum = mtree.find_progenitors_until_z(
-                mtree, self.df['nodeIndex'].values, snapnum_pred, snapnum_obs)
-        ## Filter
-        _indx = self.match_halos(self.df['nodeIndex'].values, _nodeID)
-        
-        
-        print('test 1', len(_indx), len(np.unique(_indx)))
-        print('test 2', self.df['nodeIndex'].size,
-              np.max(_indx), self.df.index)
-        print(np.sort(_nodeID))
-        print(np.sort(self.df['nodeIndex'].values))
-        
-        self.df = self.df.iloc[np.unique(_indx)]
-        self.df.index = range(len(self.df.index))
-        
-        print(np.sort(self.df['nodeIndex'].values))
+        if simulation != "EAGLE":
+            mtree = DHalo(self.mt_file, 'original')
+            _nodeID, _prognum = mtree.find_progenitors_until_z(
+                    mtree, self.df['nodeIndex'].values, snapnum_pred, snapnum_obs)
+            ## Filter
+            _indx = self.match_halos(self.df['nodeIndex'].values, _nodeID)
+            
+            self.df = self.df.iloc[np.unique(_indx)]
+            self.df.index = range(len(self.df.index))
 
-        _indx = self.match_halos(_nodeID, self.df['nodeIndex'].values)
-        _nodeID = _nodeID[_indx]
-        _prognum = _prognum[_indx]
+            _indx = self.match_halos(_nodeID, self.df['nodeIndex'].values)
+            _nodeID = _nodeID[_indx]
+            _prognum = _prognum[_indx]
 
-        self.df = self.df.sort_values(by=['nodeIndex'], ascending=True)
-        _indx = np.argsort(_nodeID)
+            self.df = self.df.sort_values(by=['nodeIndex'], ascending=True)
+            _indx = np.argsort(_nodeID)
 
-        _prognum_dict = {}
-        for ii in range(_prognum.shape[1]):
-            _prognum_dict[('progenitors', str(ii))] = _prognum[_indx, ii]
-        dfp = pd.DataFrame.from_dict(_prognum_dict)
-        self.df = pd.concat([self.df, dfp], axis=1)               
-        #if self.simulation == "EAGLE":
+            _prognum_dict = {}
+            for ii in range(_prognum.shape[1]):
+                _prognum_dict[('progenitors', str(ii))] = _prognum[_indx, ii]
+            dfp = pd.DataFrame.from_dict(_prognum_dict)
+            self.df = pd.concat([self.df, dfp], axis=1)               
+        elif simulation == "EAGLE":
+            mtree = DHalo(self.mt_file, 'EAGLE')
+            print('mtee', mtree)
+            _nodeID, _prognum = mtree.find_progenitors_until_z_EAGLE(
+                    self.dfmt, self.df['HaloID'].values,
+                    snapnum_pred, snapnum_obs, self.simulation)
+            ## Filter
+            _indx = self.match_halos(self.df['nodeIndex'].values, _nodeID)
+            
+            self.df = self.df.iloc[np.unique(_indx)]
+            self.df.index = range(len(self.df.index))
+
+            _indx = self.match_halos(_nodeID, self.df['nodeIndex'].values)
+            _nodeID = _nodeID[_indx]
+            _prognum = _prognum[_indx]
+
+            self.df = self.df.sort_values(by=['nodeIndex'], ascending=True)
+            _indx = np.argsort(_nodeID)
+
+            _prognum_dict = {}
+            for ii in range(_prognum.shape[1]):
+                _prognum_dict[('progenitors', str(ii))] = _prognum[_indx, ii]
+            dfp = pd.DataFrame.from_dict(_prognum_dict)
+            self.df = pd.concat([self.df, dfp], axis=1)               
 
 
     def concentration(self):
